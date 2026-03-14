@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Relay Control - RAKESH VEMURI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; text-align: center; background-color: #f0f2f5; margin: 0; padding: 20px; }
+    h1 { color: #333; }
+    #dashboard { display: none; }
+    .relay-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 20px; }
+    .relay-card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 260px; }
+    .toggle-btn { width: 100%; padding: 12px; border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: bold; margin-bottom: 15px; transition: 0.3s; }
+    .scheduler { border-top: 1px solid #eee; padding-top: 15px; text-align: left; }
+    .scheduler label { font-size: 0.85rem; font-weight: bold; color: #555; }
+    .scheduler input[type="time"] { width: 100%; padding: 8px; margin: 5px 0 10px; border: 1px solid #ddd; border-radius: 5px; }
+    #loginForm { max-width: 350px; margin: 80px auto; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+    #loginForm input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+    #loginBtn { width: 100%; padding: 12px; background: #1e88e5; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    footer { margin-top: 40px; color: #888; font-weight: bold; padding-bottom: 40px; }
+  </style>
+</head>
+<body>
+
+  <h1>Relay Dashboard</h1>
+
+  <div id="loginForm">
+    <h3>Authentication</h3>
+    <input type="email" id="email" placeholder="Email" value="eee.rakesh@gmail.com" />
+    <input type="password" id="password" placeholder="Password" />
+    <button id="loginBtn">Login</button>
+  </div>
+
+  <div id="dashboard">
+    <div class="relay-container" id="relayContainer"></div>
+    <div style="margin-top: 30px;">
+      <button onclick="firebase.auth().signOut().then(() => location.reload())" style="padding:10px 20px; background:#444; color:white; border:none; border-radius:5px; cursor:pointer;">Logout</button>
+    </div>
+  </div>
+
+  <footer>Created by RAKESH VEMURI</footer>
+
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAxKfIWJbyHc5YSjfc5KNW5suoD75ekDbE",
+      authDomain: "esp32-8ch-relay.firebaseapp.com",
+      databaseURL: "https://esp32-8ch-relay-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "esp32-8ch-relay",
+      storageBucket: "esp32-8ch-relay.firebasestorage.app",
+      messagingSenderId: "162489388504",
+      appId: "1:162489388504:web:8eb9ffff6cfcce445876ad"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const relayList = [1, 2, 3, 4, 5, 6, 7, 8];
+    const container = document.getElementById('relayContainer');
+
+    // Generate Relay Cards HTML
+    relayList.forEach(num => {
+      container.innerHTML += `
+        <div class="relay-card">
+          <h2 style="margin:0; color:#1e88e5;">Relay ${num}</h2>
+          <p>Status: <span id="status${num}" style="font-weight:bold">--</span></p>
+          <button class="toggle-btn" id="btn${num}">Toggle</button>
+          <div class="scheduler">
+            <label><input type="checkbox" id="schedActive${num}"> Enable Schedule</label><br><br>
+            <label>ON Time:</label>
+            <input type="time" id="onTime${num}">
+            <label>OFF Time:</label>
+            <input type="time" id="offTime${num}">
+          </div>
+        </div>
+      `;
+    });
+
+    // Login Handler
+    document.getElementById("loginBtn").onclick = () => {
+      const email = document.getElementById("email").value;
+      const pass = document.getElementById("password").value;
+      firebase.auth().signInWithEmailAndPassword(email, pass)
+        .then(() => {
+          document.getElementById("loginForm").style.display = "none";
+          document.getElementById("dashboard").style.display = "block";
+          initDashboard();
+        }).catch(err => alert(err.message));
+    };
+
+    function initDashboard() {
+      relayList.forEach(id => {
+        const relayRef = db.ref(`relay${id}`);
+        const schedRootRef = db.ref(`sched/relay${id}`);
+
+        // 1. Sync Relay UI with Database
+        relayRef.on("value", snap => {
+          const isOn = snap.val();
+          const btn = document.getElementById(`btn${id}`);
+          const statusSpan = document.getElementById(`status${id}`);
+          statusSpan.innerText = isOn ? "ON" : "OFF";
+          statusSpan.style.color = isOn ? "#2e7d32" : "#d32f2f";
+          btn.style.backgroundColor = isOn ? "#4CAF50" : "#2196F3";
+          btn.innerText = isOn ? "Turn OFF" : "Turn ON";
+        });
+
+        // 2. Load Existing Schedule Data
+        schedRootRef.on("value", snap => {
+          const data = snap.val();
+          if (data) {
+            document.getElementById(`schedActive${id}`).checked = data.active || false;
+            document.getElementById(`onTime${id}`).value = data.on || "";
+            document.getElementById(`offTime${id}`).value = data.off || "";
+          }
+        });
+
+        // 3. FIXED SAVE LOGIC: Update specific paths for ESP32 compatibility
+        const updateSchedule = () => {
+          const activeVal = document.getElementById(`schedActive${id}`).checked;
+          const onVal = document.getElementById(`onTime${id}`).value;
+          const offVal = document.getElementById(`offTime${id}`).value;
+
+          // We use .set() on the specific endpoints so the ESP32 
+          // receives a simple string update, not a complex JSON object.
+          if(onVal) db.ref(`sched/relay${id}/on`).set(onVal);
+          if(offVal) db.ref(`sched/relay${id}/off`).set(offVal);
+          db.ref(`sched/relay${id}/active`).set(activeVal);
+          
+          console.log(`Relay ${id} schedule updated.`);
+        };
+
+        // Attach listeners to trigger update on UI change
+        document.getElementById(`schedActive${id}`).onchange = updateSchedule;
+        document.getElementById(`onTime${id}`).onchange = updateSchedule;
+        document.getElementById(`offTime${id}`).onchange = updateSchedule;
+
+        // Manual Toggle Logic
+        document.getElementById(`btn${id}`).onclick = () => {
+          relayRef.once('value').then(snap => {
+            relayRef.set(!snap.val());
+          });
+        };
+      });
+    }
+  </script>
+</body>
+</html>
