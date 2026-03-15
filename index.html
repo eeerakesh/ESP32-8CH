@@ -11,13 +11,16 @@
     .relay-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 20px; }
     .relay-card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 260px; }
     .toggle-btn { width: 100%; padding: 12px; border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: bold; margin-bottom: 15px; transition: 0.3s; }
-    .scheduler { border-top: 1px solid #eee; padding-top: 15px; text-align: left; }
-    .scheduler label { font-size: 0.85rem; font-weight: bold; color: #555; }
-    .scheduler input[type="time"] { width: 100%; padding: 8px; margin: 5px 0 10px; border: 1px solid #ddd; border-radius: 5px; }
+    .scheduler { border-top: 1px solid #eee; padding-top: 15px; text-align: left; margin-top:10px; }
+    .scheduler label { font-size: 0.85rem; font-weight: bold; color: #555; display:block; margin-top:8px; }
+    .scheduler input[type="time"], .scheduler input[type="date"] { width: 100%; padding: 8px; margin: 5px 0 10px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+    .prev-schedule { background: #f9f9f9; padding: 5px 10px; margin-top: 8px; border-radius: 5px; font-size:0.8rem; color:#333; }
     #loginForm { max-width: 350px; margin: 80px auto; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
     #loginForm input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
     #loginBtn { width: 100%; padding: 12px; background: #1e88e5; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    .reset-btn { width:100%; padding:8px; margin-top:5px; border:none; border-radius:5px; background:#ff5555; color:white; cursor:pointer; font-size:0.85rem; }
     footer { margin-top: 40px; color: #888; font-weight: bold; padding-bottom: 40px; }
+    @media(max-width:480px){ .relay-card{width:90%;} }
   </style>
 </head>
 <body>
@@ -34,7 +37,7 @@
   <div id="dashboard">
     <div class="relay-container" id="relayContainer"></div>
     <div style="margin-top: 30px;">
-      <button onclick="firebase.auth().signOut().then(() => location.reload())" style="padding:10px 20px; background:#444; color:white; border:none; border-radius:5px; cursor:pointer;">Logout</button>
+      <button onclick="logout()" style="padding:10px 20px; background:#444; color:white; border:none; border-radius:5px; cursor:pointer;">Logout</button>
     </div>
   </div>
 
@@ -57,11 +60,10 @@
 
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-
-    const relayList = [1, 2, 3, 4, 5, 6, 7, 8];
+    const relayList = [1,2,3,4,5,6,7,8];
     const container = document.getElementById('relayContainer');
 
-    // Generate Relay Cards HTML
+    // Generate relay cards
     relayList.forEach(num => {
       container.innerHTML += `
         <div class="relay-card">
@@ -69,34 +71,60 @@
           <p>Status: <span id="status${num}" style="font-weight:bold">--</span></p>
           <button class="toggle-btn" id="btn${num}">Toggle</button>
           <div class="scheduler">
-            <label><input type="checkbox" id="schedActive${num}"> Enable Schedule</label><br><br>
+            <label><input type="checkbox" id="schedActive${num}"> Enable Schedule</label>
+            <label>Date (optional)</label>
+            <input type="date" id="schedDate${num}">
             <label>ON Time:</label>
             <input type="time" id="onTime${num}">
             <label>OFF Time:</label>
             <input type="time" id="offTime${num}">
+            <button class="reset-btn" id="reset${num}">Reset Schedule</button>
+            <div class="prev-schedule" id="prev${num}">Previous: --</div>
           </div>
         </div>
       `;
     });
 
-    // Login Handler
+    // Auto-login
+    window.onload = () => {
+      const storedEmail = localStorage.getItem('email');
+      const storedPass = localStorage.getItem('password');
+      if(storedEmail && storedPass) login(storedEmail, storedPass);
+    };
+
     document.getElementById("loginBtn").onclick = () => {
       const email = document.getElementById("email").value;
       const pass = document.getElementById("password").value;
+      login(email, pass);
+    };
+
+    function login(email, pass){
       firebase.auth().signInWithEmailAndPassword(email, pass)
         .then(() => {
+          localStorage.setItem('email', email);
+          localStorage.setItem('password', pass);
           document.getElementById("loginForm").style.display = "none";
           document.getElementById("dashboard").style.display = "block";
           initDashboard();
         }).catch(err => alert(err.message));
-    };
+    }
 
-    function initDashboard() {
+    function logout(){
+      firebase.auth().signOut().then(()=>{
+        localStorage.removeItem('email');
+        localStorage.removeItem('password');
+        location.reload();
+      });
+    }
+
+    function initDashboard(){
       relayList.forEach(id => {
         const relayRef = db.ref(`relay${id}`);
-        const schedRootRef = db.ref(`sched/relay${id}`);
+        const schedRef = db.ref(`sched/relay${id}`);
 
-        // 1. Sync Relay UI with Database
+        const prevDiv = document.getElementById(`prev${id}`);
+
+        // Sync relay status
         relayRef.on("value", snap => {
           const isOn = snap.val();
           const btn = document.getElementById(`btn${id}`);
@@ -107,41 +135,51 @@
           btn.innerText = isOn ? "Turn OFF" : "Turn ON";
         });
 
-        // 2. Load Existing Schedule Data
-        schedRootRef.on("value", snap => {
+        // Load previous schedules
+        schedRef.on("value", snap => {
           const data = snap.val();
-          if (data) {
+          if(data){
             document.getElementById(`schedActive${id}`).checked = data.active || false;
             document.getElementById(`onTime${id}`).value = data.on || "";
             document.getElementById(`offTime${id}`).value = data.off || "";
+            document.getElementById(`schedDate${id}`).value = data.date || "";
+            prevDiv.innerText = `Previous: ${data.active ? 'ON' : 'OFF'}, ON:${data.on||'--'}, OFF:${data.off||'--'}, Date:${data.date||'--'}`;
+          } else {
+            prevDiv.innerText = "Previous: --";
           }
         });
 
-        // 3. FIXED SAVE LOGIC: Update specific paths for ESP32 compatibility
+        // Update schedule
         const updateSchedule = () => {
           const activeVal = document.getElementById(`schedActive${id}`).checked;
           const onVal = document.getElementById(`onTime${id}`).value;
           const offVal = document.getElementById(`offTime${id}`).value;
-
-          // We use .set() on the specific endpoints so the ESP32 
-          // receives a simple string update, not a complex JSON object.
+          const dateVal = document.getElementById(`schedDate${id}`).value;
           if(onVal) db.ref(`sched/relay${id}/on`).set(onVal);
           if(offVal) db.ref(`sched/relay${id}/off`).set(offVal);
           db.ref(`sched/relay${id}/active`).set(activeVal);
-          
-          console.log(`Relay ${id} schedule updated.`);
+          db.ref(`sched/relay${id}/date`).set(dateVal);
         };
 
-        // Attach listeners to trigger update on UI change
         document.getElementById(`schedActive${id}`).onchange = updateSchedule;
         document.getElementById(`onTime${id}`).onchange = updateSchedule;
         document.getElementById(`offTime${id}`).onchange = updateSchedule;
+        document.getElementById(`schedDate${id}`).onchange = updateSchedule;
 
-        // Manual Toggle Logic
+        // Manual toggle
         document.getElementById(`btn${id}`).onclick = () => {
           relayRef.once('value').then(snap => {
             relayRef.set(!snap.val());
           });
+        };
+
+        // Reset schedule
+        document.getElementById(`reset${id}`).onclick = () => {
+          document.getElementById(`schedActive${id}`).checked = false;
+          document.getElementById(`onTime${id}`).value = "";
+          document.getElementById(`offTime${id}`).value = "";
+          document.getElementById(`schedDate${id}`).value = "";
+          db.ref(`sched/relay${id}`).set({active:false, on:"", off:"", date:""});
         };
       });
     }
